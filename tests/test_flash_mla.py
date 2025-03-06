@@ -1,3 +1,4 @@
+# Adapted from deepseek-ai/FlashMLA(https://github.com/deepseek-ai/FlashMLA)
 import math
 import random
 
@@ -6,7 +7,7 @@ import triton
 import pytest
 
 # from flash_mla import get_mla_metadata, flash_mla_with_kvcache
-from flash_attn import (
+from flash_mla import (
     get_mla_metadata,
     flash_mla_with_kvcache
 )
@@ -37,13 +38,12 @@ def cal_diff(x: torch.Tensor, y: torch.Tensor, name: str) -> None:
     RMSE = ((x - y) * (x - y)).mean().sqrt().item()
     cos_diff = 1 - 2 * (x * y).sum().item() / max((x * x + y * y).sum().item(), 1e-12)
     amax_diff = (x - y).abs().max().item()
-    print(f"{name}: {cos_diff=}, {RMSE=}, {amax_diff=}")
+    # print(f"{name}: {cos_diff=}, {RMSE=}, {amax_diff=}")
     assert cos_diff < 1e-5
 
 
 @torch.inference_mode()
 def test_flash_mla(b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen, block_size):
-    print(f"{b=}, {s_q=}, {mean_sk=}, {h_q=}, {h_kv=}, {d=}, {dv=}, {causal=}, {varlen=}")
 
     cache_seqlens = torch.full((b,), mean_sk, dtype=torch.int32)
     if varlen:
@@ -96,7 +96,7 @@ def test_flash_mla(b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen, block_size
     t = triton.testing.do_bench(flash_mla)
     FLOPS = s_q * total_seqlens * h_q * (d + dv) * 2
     bytes = (total_seqlens * h_kv * d + b * s_q * h_q * d + b * s_q * h_q * dv) * (torch.finfo(dtype).bits // 8)
-    print(f"{t:.3f} ms, {FLOPS / 10 ** 9 / t:.0f} TFLOPS, {bytes / 10 ** 6 / t:.0f} GB/s")
+    print(f"{b}, {s_q}, {mean_sk}, {h_q}, {h_kv}, {d}, {dv}, {causal}, {varlen}, {t:.3f}, {FLOPS / 10 ** 9 / t:.0f}, {bytes / 10 ** 6 / t:.0f}")
 
 
 @pytest.mark.parametrize("b",[128])
@@ -120,6 +120,7 @@ if __name__ == "__main__":
     torch.cuda.set_device(device)
     torch.manual_seed(0)
     random.seed(0)
+    print(f"batch, seqlen_q, mean_sk, h_q, h_kv, d, dv, causal, varlen, time(ms), TFLOPS, bandwith(GB/s)")
 
     h_kv = 1
     d, dv = 576, 512

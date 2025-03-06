@@ -151,7 +151,7 @@ if not SKIP_CUDA_BUILD:
     if os.path.exists(os.path.join(torch_dir, "include", "ATen", "CUDAGeneratorImpl.h")):
         generator_flag = ["-DOLD_GENERATOR_PATH"]
 
-    check_if_cuda_home_none("flash_attn")
+    check_if_cuda_home_none("flash_mla")
     # Check, if CUDA11 is installed for compute capability 8.0
     cc_flag = []
     if CUDA_HOME is not None:
@@ -180,7 +180,7 @@ if not SKIP_CUDA_BUILD:
         torch._C._GLIBCXX_USE_CXX11_ABI = True
     ext_modules.append(
         CUDAExtension(
-            name="flash_attn_2_cuda",
+            name="flash_mla_cuda",
             sources=[
                 "csrc/flash_api/flash_api.cpp",
                 "csrc/flash_run/run_mha_fwd.cpp",
@@ -221,10 +221,10 @@ if not SKIP_CUDA_BUILD:
         )
     )
 
-def get_sha(flash_attn_root: Union[str, Path]) -> str:
+def get_sha(flash_mla_root: Union[str, Path]) -> str:
     try:
         return (
-            subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=flash_attn_root)
+            subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=flash_mla_root)
             .decode("ascii")
             .strip()
         )
@@ -232,9 +232,9 @@ def get_sha(flash_attn_root: Union[str, Path]) -> str:
         return "Unknown"
 
 def get_package_version():
-    flash_attn_root = Path(__file__).parent.parent
-    sha = get_sha(flash_attn_root)
-    with open(Path(this_dir) / "flash_attn" / "__init__.py", "r") as f:
+    flash_mla_root = Path(__file__).parent.parent
+    sha = get_sha(flash_mla_root)
+    with open(Path(this_dir) / "flash_mla" / "__init__.py", "r") as f:
         version_match = re.search(r"^__version__\s*=\s*(.*)$", f.read(), re.MULTILINE)
     public_version = str(ast.literal_eval(version_match.group(1)))
     maca_version = os.environ.get("CORE_MODULE_MACA_VERSION")
@@ -322,12 +322,12 @@ setup(
             "dist",
             "docs",
             "benchmarks",
-            "flash_attn.egg-info",
+            "flash_mla.egg-info",
         )
     ),
-    author="Tri Dao",
+    author="Tri Dao, DeepSeek",
     author_email="trid@cs.stanford.edu",
-    description="Flash Attention: Fast and Memory-Efficient Exact Attention",
+    description="Flash Attention: Fast and Memory-Efficient Exact Attention & flashMLA",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/Dao-AILab/flash-attention",

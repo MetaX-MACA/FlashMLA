@@ -1,3 +1,4 @@
+// Adapted from Dao-AILab/flash-attention (https://github.com/Dao-AILab/flash-attention/tree/v2.6.3)
 // Inspired by
 // https://github.com/NVIDIA/DALI/blob/main/include/dali/core/static_switch.h
 // and https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/Dispatch.h
@@ -120,34 +121,31 @@
     }                                        \
   }()
 
-// #define HEADDIM_SWITCH(HEADDIM, ...)   \
-//   [&] {                                    \
-//     if (HEADDIM <= 32) {                   \
-//       constexpr static int kHeadDim = 32;  \
-//       return __VA_ARGS__();                \
-//     } else if (HEADDIM <= 64) {            \
-//       constexpr static int kHeadDim = 64;  \
-//       return __VA_ARGS__();                \
-//     } else if (HEADDIM <= 96) {            \
-//       constexpr static int kHeadDim = 96;  \
-//       return __VA_ARGS__();                \
-//     } else if (HEADDIM <= 128) {           \
-//       constexpr static int kHeadDim = 128; \
-//       return __VA_ARGS__();                \
-//     } else if (HEADDIM <= 160) {           \
-//       constexpr static int kHeadDim = 160; \
-//       return __VA_ARGS__();                \
-//     } else if (HEADDIM <= 192) {           \
-//       constexpr static int kHeadDim = 192; \
-//       return __VA_ARGS__();                \
-//     } else if (HEADDIM <= 224) {           \
-//       constexpr static int kHeadDim = 224; \
-//       return __VA_ARGS__();                \
-//     } else if (HEADDIM <= 256) {           \
-//       constexpr static int kHeadDim = 256; \
-//       return __VA_ARGS__();                \
-//     }                                      \
-//   }()
+#define NUMSPLITS_SWITCH(NUMSPLITS, ...)       \
+  [&] {                                        \
+    if (NUMSPLITS <= 2) {                      \
+      constexpr static int kLogMaxSplits = 1;  \
+      return __VA_ARGS__();                    \
+    } else if (NUMSPLITS <= 4) {               \
+      constexpr static int kLogMaxSplits = 2;  \
+      return __VA_ARGS__();                    \
+    } else if (NUMSPLITS <= 8) {               \
+      constexpr static int kLogMaxSplits = 3;  \
+      return __VA_ARGS__();                    \
+    } else if (NUMSPLITS <= 16) {              \
+      constexpr static int kLogMaxSplits = 4;  \
+      return __VA_ARGS__();                    \
+    } else if (NUMSPLITS <= 32) {              \
+      constexpr static int kLogMaxSplits = 5;  \
+      return __VA_ARGS__();                    \
+    } else if (NUMSPLITS <= 64) {              \
+      constexpr static int kLogMaxSplits = 6;  \
+      return __VA_ARGS__();                    \
+    } else if (NUMSPLITS <= 128) {             \
+      constexpr static int kLogMaxSplits = 7;  \
+      return __VA_ARGS__();                    \
+    }                                          \
+  }()
 
 #define ROWNUM_SWITCH(COND, CONST_NAME, ...) \
   [&] {                                      \

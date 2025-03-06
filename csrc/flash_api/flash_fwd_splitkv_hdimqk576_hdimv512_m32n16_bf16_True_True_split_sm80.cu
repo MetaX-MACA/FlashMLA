@@ -1,6 +1,4 @@
-// Copyright (c) 2024, Tri Dao.
-// Splitting the different head dimensions to different files to speed up compilation.
-// This file is auto-generated. See "generate_kernels.py"
+// Adapted from Dao-AILab/flash-attention (https://github.com/Dao-AILab/flash-attention/tree/v2.6.3)
 
 #include "flash_mla.h"
 #include "flash_run_fwd_template_impl.h"

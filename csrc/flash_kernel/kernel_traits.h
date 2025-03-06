@@ -1,3 +1,4 @@
+// Adapted from Dao-AILab/flash-attention (https://github.com/Dao-AILab/flash-attention/tree/v2.6.3)
 /******************************************************************************
  * Copyright (c) 2024, Tri Dao.
  ******************************************************************************/
@@ -136,7 +137,7 @@ struct Flash_fwd_kernel_traits : public Base {
         SmemLayoutAtomO{},
         Shape<Int<kBlockM>, Int<kHeadDimV>>{}));
     using SmemCopyAtomO = Copy_Atom<UniversalCopy<uint64_t>, Element>;
-    using SmemCopyAtomOaccum = Copy_Atom<DefaultCopy, ElementAccum>;
+    using SmemCopyAtomOaccum = Copy_Atom<UniversalCopy<uint128_t>, ElementAccum>;
 
  static constexpr int kBlockKSmemMask = kBlockN % 64 == 0 ? 64 : (kBlockN % 32 == 0 ? 32: 16);
     static constexpr int kSwizzleMask = kBlockKSmemMask == 32 ? 3 : 4;

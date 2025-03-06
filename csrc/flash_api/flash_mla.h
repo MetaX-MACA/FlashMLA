@@ -1,3 +1,4 @@
+// Adapted from deepseek-ai/FlashMLA(https://github.com/deepseek-ai/FlashMLA)
 /******************************************************************************
  * Copyright (c) 2023, Tri Dao.
  ******************************************************************************/
@@ -60,6 +61,7 @@ struct Flash_fwd_mla_params : public Qkv_params {
 
     // The dimensions.
     int b, seqlen_q, seqlen_k, seqlen_knew, d, d_v, seqlen_q_rounded, seqlen_k_rounded, d_rounded, rotary_dim, total_q;
+    int ngroups;
 
     // The scaling factors for the kernel.
     float scale_softmax;

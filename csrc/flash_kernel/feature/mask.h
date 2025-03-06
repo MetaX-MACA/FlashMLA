@@ -1,3 +1,4 @@
+// Adapted from Dao-AILab/flash-attention (https://github.com/Dao-AILab/flash-attention/tree/v2.6.3)
 /******************************************************************************
  * Copyright (c) 2024, Tri Dao.
  ******************************************************************************/
@@ -40,7 +41,7 @@ template <bool HasWSLeft=true, typename Engine, typename Layout>
 __forceinline__ __device__ void apply_mask_local(Tensor<Engine, Layout> &tensor, const int col_idx_offset_,
                                         const int max_seqlen_k, const int row_idx_offset,
                                         const int max_seqlen_q, const int warp_row_stride,
-                                        const int window_size_left, const int window_size_right, 
+                                        const int window_size_left, const int window_size_right,
                                         const int warp_col_stride = 16) {
     // tensor has shape (nrow=(1, MMA_M), ncol=(4, MMA_N))
     static_assert(Layout::rank == 2, "Only support 2D Tensor");
@@ -111,15 +112,16 @@ __forceinline__ __device__ void apply_mask_causal_w_idx(
 template <bool Is_causal, bool Is_local, bool Has_alibi>
 struct Mask {
 
-    const int max_seqlen_k, max_seqlen_q;
+    const int max_seqlen_k, max_seqlen_q, ngroups;
     const int window_size_left, window_size_right;
     const float alibi_slope;
 
-    __forceinline__ __device__ Mask(const int max_seqlen_k, const int max_seqlen_q,
+    __forceinline__ __device__ Mask(const int max_seqlen_k, const int max_seqlen_q, const int ngroups,
                                     const int window_size_left, const int window_size_right,
                                     const float alibi_slope=0.f)
         : max_seqlen_k(max_seqlen_k)
         , max_seqlen_q(max_seqlen_q)
+        , ngroups(ngroups)
         , window_size_left(window_size_left)
         , window_size_right(window_size_right)
         , alibi_slope(!Has_alibi ? 0.0 : alibi_slope) {
@@ -169,7 +171,7 @@ struct Mask {
                     for (int i = 0; i < size<0, 0>(tensor); ++i) {
                         const int row_idx = row_idx_base + i * 16;
                         const int col_idx_limit_left = std::max(0, row_idx + max_seqlen_k - max_seqlen_q - window_size_left);
-                        const int col_idx_limit_right = std::min(max_seqlen_k, row_idx + 1 + max_seqlen_k - max_seqlen_q + window_size_right);
+                        const int col_idx_limit_right = std::min(max_seqlen_k, row_idx / ngroups + 1 + max_seqlen_k - max_seqlen_q / ngroups + window_size_right);
                         #pragma unroll
                         for (int nj = 0; nj < size<1, 1>(tensor); ++nj) {
                             const int col_idx_base = col_idx_offset + nj * 16;

@@ -1,10 +1,9 @@
 # FlashMLA on MXMACA
-
 We provide the implementation of FlashMLA from FlashAttention-2(version 2.6.3), based on MACA toolkit and C500 chips.
 
 FlashAttention-2 currently supports:
 1. Datatype fp16 and bf16.
-2. Multi-Token Parallelism = 1
+2. Multi-Token Prediction greater or equal to 1.
 3. Paged kvcache with block size equal to 2^n (n >= 0)
 
 ## How to run on MXMACA Device
@@ -16,9 +15,9 @@ Requirements:
 - mcTlass source code.
 - mcPytorch2.1 and mcTriton2.1 from maca toolkit wheel package and above.
 
-To install:
-1. Make sure that maca pyTorch2.1 is installed.
-2. Download mctlass source code from: https://sw-download.metax-tech.com/
+To install flash attn in conda env:
+1. Make sure that maca pytorch2.1 and triton2.1 is installed.
+2. Download mctlass source code from FlashAttention2/csrc/mctlass on website : https://sw-download.metax-tech.com/
 
 ### Set environment variables
 ```bash
@@ -77,4 +76,3 @@ FlashMLA is inspired by [FlashAttention 2&3](https://github.com/dao-AILab/flash-
       publisher = {GitHub},
       howpublished = {\url{https://github.com/deepseek-ai/FlashMLA}},
 }
-```

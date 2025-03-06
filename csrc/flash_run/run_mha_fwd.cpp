@@ -1,3 +1,4 @@
+// Adapted from Dao-AILab/flash-attention (https://github.com/Dao-AILab/flash-attention/tree/v2.6.3)
 
 #include <mctlass/numeric_types.h>
 #include "run_mha.h"
