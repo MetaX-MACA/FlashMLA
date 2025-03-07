@@ -15,8 +15,8 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
 Licences for third-party open source software
 
 This software also contains code from deepseek-ai /FlashMLA（https://github.com/deepseek-ai/FlashMLA）, facebookresearch/ xformers （https://github.com/facebookresearch/xformers/tree/v0.0.23）and Dao-AILab /flash-attention （https://github.com/Dao-AILab/flash-attention/tree/v2.6.3） Below are licenses of deepseek-ai /FlashMLA, facebookresearch/ xformers and Dao-AILab /flash-attention.
- 
-deepseek-ai /FlashMLA 
+
+deepseek-ai /FlashMLA
 MIT License
 Copyright (c) 2025 DeepSeek
 

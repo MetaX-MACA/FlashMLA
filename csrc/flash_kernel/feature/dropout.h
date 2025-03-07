@@ -1,4 +1,5 @@
 // Adapted from Dao-AILab/flash-attention (https://github.com/Dao-AILab/flash-attention/tree/v2.6.3)
+
 /******************************************************************************
  * Copyright (c) 2024, Tri Dao.
  ******************************************************************************/
@@ -131,7 +132,7 @@ struct Dropout {
 
     // it works for:
     // blockN=64, waves layout: 4x1, 2x2, 4x2, 1x4, 2x4
-    // blockN=128, waves layout: 1x4, 2x4 
+    // blockN=128, waves layout: 1x4, 2x4
     template <bool encode_dropout_in_sign_bit = false, int AtomLayoutMS = 2, int AtomLayoutNS = 2, typename Engine, typename Layout>
     __forceinline__ __device__ void mc_apply_dropout(Tensor<Engine, Layout> &tensor, int block_row_start, int block_col_start) {
         using T = typename Engine::value_type;

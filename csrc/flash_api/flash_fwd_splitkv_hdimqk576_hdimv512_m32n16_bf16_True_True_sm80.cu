@@ -8,11 +8,10 @@ template void run_flash_splitkv_fwd_template<
                 576,
                 32,
                 16,
-                2,
+                4,
                 true,
                 true,
                 cutlass::bfloat16_t,
                 false,
                 512
             >(Flash_fwd_mla_params &params, cudaStream_t stream);
-

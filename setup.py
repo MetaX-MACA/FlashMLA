@@ -203,6 +203,11 @@ if not SKIP_CUDA_BUILD:
                         "--expt-relaxed-constexpr",
                         "--expt-extended-lambda",
                         "--use_fast_math",
+                        "-mllvm",
+                        "-metaxgpu-disable-bsm-offset=0",#try to merge ldg/lds
+                        "-D__FAST_HALF_CVT__",
+                        "-Xclang",
+                        "-menable-no-nans",
                     ]
                     + generator_flag
                     + cc_flag

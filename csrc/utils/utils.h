@@ -505,6 +505,39 @@ __forceinline__ __device__ void copy_b128(Tensor<Engine0, Layout0> const &S,
     }
 }
 
+// for tensor shape is (cols=4, m, k).
+template <bool Is_even_MN=true, bool Is_even_K=true, typename Engine0, typename Layout0,
+          typename Engine1, typename Layout1, typename Engine2, typename Layout2>
+__forceinline__ __device__ void copy_b64(Tensor<Engine0, Layout0> const &S,
+                                          Tensor<Engine1, Layout1> &D,
+                                          Tensor<Engine2, Layout2> const &identity_MN,
+                                          const int d,
+                                          const int max_MN=0) {
+    CUTE_STATIC_ASSERT_V(rank(S) == Int<3>{});
+    CUTE_STATIC_ASSERT_V(rank(D) == Int<3>{});
+    CUTE_STATIC_ASSERT_V(size<0>(S) == size<0>(D));                     // MMA
+    CUTE_STATIC_ASSERT_V(size<1>(S) == size<1>(D));                     // MMA_M
+    CUTE_STATIC_ASSERT_V(size<2>(S) == size<2>(D));                     // MMA_K
+
+    typedef __NATIVE_VECTOR__(2, int) VecType;
+    #pragma unroll
+    for (int m = 0; m < size<1>(S); ++m) {
+        bool row_mask = Is_even_MN || get<0>(identity_MN(0, m, 0)) < max_MN;
+        #pragma unroll
+        for (int k = 0; k < size<2>(S); ++k) {
+            auto src_ptr = (VecType *)(S(_, m, k).data().get());    // gmem
+            auto dst_ptr = (VecType *)(D(_, m, k).data());          // rf
+            bool col_mask = Is_even_K || get<1>(identity_MN(0, 0, k)) < d;
+            if constexpr (Is_even_MN && Is_even_K) {
+                *dst_ptr = __builtin_mxc_ldg_b64(src_ptr, 0, -1, true, true, false, false);
+            } else {
+                *dst_ptr = __builtin_mxc_ldg_b64_predicator(src_ptr, 0, true, true, false, false,
+                                                            row_mask && col_mask, 1, MACA_ICMP_EQ);
+            }
+        }
+    }
+}
+
 template <typename Engine, typename Layout>
 __forceinline__ __device__ void swap_fragment(Tensor<Engine, Layout> &S) {
     using data_type = typename Engine::value_type;
@@ -617,6 +650,53 @@ __forceinline__ __device__ void copy_b128_page_one(Tensor<Engine0, Layout0> cons
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+
+template <typename Kernel_traits, bool Is_even_MN=true, bool Is_even_K=true, typename Engine0, typename Layout0,
+          typename Engine1, typename Layout1, typename Engine2, typename Layout2, typename Engine3, typename Layout3>
+__forceinline__ __device__ void copy_b64_page_one(Tensor<Engine0, Layout0> const &S_base,
+                                          Tensor<Engine1, Layout1> &S,
+                                          Tensor<Engine2, Layout2> &D,
+                                          Tensor<Engine3, Layout3> const &identity_MN,
+                                          const int d,
+                                          const int n_block,
+                                          const int *block_table,
+                                          const int page_stride,
+                                          const int row_stride,
+                                          const int page_block_size,
+                                          const int max_MN=0) {
+    CUTE_STATIC_ASSERT_V(rank(S) == Int<3>{});
+    CUTE_STATIC_ASSERT_V(rank(D) == Int<3>{});
+    CUTE_STATIC_ASSERT_V(size<0>(S) == size<0>(D));                     // MMA
+    CUTE_STATIC_ASSERT_V(size<1>(S) == size<1>(D));                     // MMA_M
+    CUTE_STATIC_ASSERT_V(size<2>(S) == size<2>(D));                     // MMA_K
+    constexpr int kBlockN = Kernel_traits::kBlockN;
+    constexpr int kNThreads = Kernel_traits::kNThreads;
+    constexpr int kGmemThreadsPerRow = Kernel_traits::kBlockKSmem / 4;
+    constexpr int kGmemRowsPerThread = 1;
+    // load 1x4 per thread
+    int tidx = threadIdx.x;
+
+    typedef __NATIVE_VECTOR__(2, int) VecType;
+    #pragma unroll
+    for (int m = 0; m < size<1>(S); ++m) {
+        bool row_mask = Is_even_MN || get<0>(identity_MN(0, m, 0)) < max_MN;
+        const int row_offset = tidx / kGmemThreadsPerRow * kGmemRowsPerThread + kNThreads / kGmemThreadsPerRow * m + n_block * kBlockN;
+        const int col_offset = tidx % kGmemThreadsPerRow * 4;
+        const int global_kv_page_offset = flash::resolve_thread_kv_page_slice_offset(page_block_size, block_table, page_stride, row_stride, row_offset, col_offset);
+        #pragma unroll
+        for (int k = 0; k < size<2>(S); ++k) {
+            auto src_ptr = (VecType *)(S_base.data().get() + global_kv_page_offset + get<2>(S.stride()) * k);
+            auto dst_ptr = (VecType *)(D(_, m, k).data());          // rf
+            bool col_mask = Is_even_K || get<1>(identity_MN(0, 0, k)) < d;
+            if constexpr (Is_even_MN && Is_even_K) {
+                *dst_ptr = __builtin_mxc_ldg_b64(src_ptr, 0, -1, true, true, false, false);
+            } else {
+                *dst_ptr = __builtin_mxc_ldg_b64_predicator(src_ptr, 0, true, true, false, false,
+                                                         row_mask && col_mask, 1, MACA_ICMP_EQ);
+            }
+        }
+    }
+}
 
 
 // resolves offset of a slice of a paged kv copy from gmem.

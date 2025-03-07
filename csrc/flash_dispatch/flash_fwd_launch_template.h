@@ -1,4 +1,5 @@
 // Adapted from Dao-AILab/flash-attention (https://github.com/Dao-AILab/flash-attention/tree/v2.6.3)
+
 #pragma once
 
 #include <cuda.h>

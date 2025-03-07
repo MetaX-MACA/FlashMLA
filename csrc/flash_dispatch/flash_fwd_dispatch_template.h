@@ -37,7 +37,7 @@ namespace mcFlashAttn {
         constexpr static int kBlockM = 32;
         constexpr static int kBlockN = 16;
         FP16_SWITCH(!params.is_bf16, [&] {
-            run_flash_splitkv_fwd_template<HeaddimQK, kBlockM, kBlockN, 2, true, true, elem_type, false, HeaddimVO>(params, stream);
+            run_flash_splitkv_fwd_template<HeaddimQK, kBlockM, kBlockN, 4, true, true, elem_type, false, HeaddimVO>(params, stream);
         });
     }
 

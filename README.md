@@ -70,7 +70,7 @@ FlashMLA is inspired by [FlashAttention 2&3](https://github.com/dao-AILab/flash-
 
 ```bibtex
 @misc{flashmla2025,
-      title={FlashMLA: Efficient MLA decoding kernel}, 
+      title={FlashMLA: Efficient MLA decoding kernel},
       author={Jiashi Li},
       year={2025},
       publisher = {GitHub},

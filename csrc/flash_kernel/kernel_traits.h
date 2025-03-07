@@ -1,4 +1,5 @@
 // Adapted from Dao-AILab/flash-attention (https://github.com/Dao-AILab/flash-attention/tree/v2.6.3)
+
 /******************************************************************************
  * Copyright (c) 2024, Tri Dao.
  ******************************************************************************/
@@ -79,10 +80,17 @@ struct Flash_fwd_kernel_traits : public Base {
     static constexpr int MBase = 3;
     static constexpr int SShift = 3;
     static constexpr int SShift_OPT = kBlockKSmem == 32 ? 3 : 4;    // for bank conflict free
+    static constexpr int kAtomLayoutMS = std::min(kBlockM / 16, kNWarps);
+    static constexpr int kAtomLayoutMO = 2;
 
-    using TiledMma = TiledMMA<
+    using TiledMmaS = TiledMMA<
         typename Base::MMA_Atom_Arch,
-        Layout<Shape<Int<kNWarps>,_1,_1>>,  // 4x1x1 or 8x1x1 thread group
+        Layout<Shape<Int<kAtomLayoutMS>,_1,_1>>,  // 2x1x1
+        typename Base::ValLayoutMNK>;
+
+    using TiledMmaO = TiledMMA<
+        typename Base::MMA_Atom_Arch,
+        Layout<Shape<Int<kAtomLayoutMO>,Int<kNWarps / kAtomLayoutMO>,_1>>,  // 2x2x1
         typename Base::ValLayoutMNK>;
 
     using SmemLayoutAtomQ = decltype(
@@ -99,7 +107,7 @@ struct Flash_fwd_kernel_traits : public Base {
         Shape<Int<kBlockN>, Int<kHeadDim>>{}));
 
     using SmemLayoutAtomK = decltype(
-        composition(Swizzle<kSwizzle, MBase, SShift_OPT>{},
+        composition(Swizzle<4, 2, 4>{},
                     Layout<Shape<_16, Int<kBlockKSmem>>,
                            Stride<Int<kBlockKSmem>, _1>>{}));
     using SmemLayoutK = decltype(tile_to_shape(
@@ -114,7 +122,7 @@ struct Flash_fwd_kernel_traits : public Base {
     using SmemLayoutAtomVtransposedNoSwizzle = Layout<Shape<Int<kBlockKSmemV>, Int<kBlockN>>,
                                                       Stride<_1, Int<kBlockKSmemV>>>;
     using SmemLayoutAtomVtransposed = decltype(
-        composition(Swizzle<kSwizzle, MBase, SShift>{}, SmemLayoutAtomVtransposedNoSwizzle{}));
+        composition(Swizzle<4, 2, 4>{}, SmemLayoutAtomVtransposedNoSwizzle{}));
     using SmemLayoutVtransposed = decltype(tile_to_shape(
         SmemLayoutAtomVtransposed{},
         Shape<Int<kHeadDimV>, Int<kBlockN>>{}));
@@ -185,21 +193,20 @@ struct Flash_fwd_kernel_traits : public Base {
 
     // We use CACHEGLOBAL instead of CACHEALWAYS for both Q and K/V, since we won't be reading
     // from the same address by the same threadblock. This is slightly faster.
-    using Gmem_copy_struct = std::conditional_t<
-        Has_cp_async,
-        SM80_CP_ASYNC_CACHEGLOBAL<cute::uint128_t>,
-        DefaultCopy
-    >;
-    using GmemTiledCopyQKV = decltype(
-        make_tiled_copy(Copy_Atom<Gmem_copy_struct, Element>{},
+    using GmemTiledCopyB128 = decltype(
+        make_tiled_copy(Copy_Atom<UniversalCopy<uint128_t>, Element>{},
                         GmemLayoutAtom{},
                         Layout<Shape<_1, _8>>{}));  // Val layout, 8 vals per read
+    using GmemTiledCopyB64 = decltype(
+        make_tiled_copy(Copy_Atom<UniversalCopy<uint64_t>, Element>{},
+                        GmemLayoutAtomB64{},
+                        Layout<Shape<_1, _4>>{}));  // Val layout, 8 vals per read
     static constexpr bool UseWarpsNx1 = kBlockN >= 16 * kNWarps;
     // from how many rows does each thread have to fetch
     static constexpr int kGmemRowsPerThread = kBlockN / (kNThreads / kGmemThreadsPerRow);
 
     using GmemTiledCopyO = decltype(
-        make_tiled_copy(Copy_Atom<DefaultCopy, Element>{},
+        make_tiled_copy(Copy_Atom<UniversalCopy<uint128_t>, Element>{},
                         GmemLayoutAtomV{},
                         Layout<Shape<_1, _8>>{}));  // Val layout, 8 vals per store
 
