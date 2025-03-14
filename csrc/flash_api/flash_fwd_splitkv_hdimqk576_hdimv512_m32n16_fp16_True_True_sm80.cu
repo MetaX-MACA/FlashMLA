@@ -13,5 +13,6 @@ template void run_flash_splitkv_fwd_template<
                 true,
                 cutlass::half_t,
                 false,
-                512
+                512,
+                2
             >(Flash_fwd_mla_params &params, cudaStream_t stream);

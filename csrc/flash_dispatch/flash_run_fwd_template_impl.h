@@ -17,10 +17,11 @@ template<
     bool Share_Q_K_smem,
     typename elem_type,
     bool Is_splits = false,
-    int kHeadDimV = kHeadDim
+    int kHeadDimV = kHeadDim,
+    int Num_Stages = 1
 >
 void run_flash_splitkv_fwd_template(mcFlashAttn::Flash_fwd_mla_params &params, cudaStream_t stream){
-    using Kernel_traits = Flash_fwd_kernel_traits<kHeadDim, kBlockM, kBlockN, kNWarps, Is_Q_in_regs, Share_Q_K_smem, elem_type,Is_splits,kHeadDimV>;
+    using Kernel_traits = Flash_fwd_kernel_traits<kHeadDim, kBlockM, kBlockN, kNWarps, Is_Q_in_regs, Share_Q_K_smem, elem_type, Is_splits, kHeadDimV, Num_Stages>;
     BOOL_SWITCH(params.is_causal, Is_causal, [&] {
         run_flash_splitkv_fwd<Kernel_traits,Is_causal>(params, stream);
     });

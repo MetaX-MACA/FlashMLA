@@ -252,7 +252,7 @@ __forceinline__ __device__ void gemm_rs(Tensor0 &acc, Tensor1 &tCrA, Tensor2 &tC
                                ThrCopy smem_thr_copy_B) {
     CUTE_STATIC_ASSERT_V(size<1>(tCrA) == size<1>(acc));                     // MMA_M
     CUTE_STATIC_ASSERT_V(size<1>(tCrB) == size<2>(acc));                     // MMA_N
-    CUTE_STATIC_ASSERT_V(size<2>(tCrA) == size<2>(tCrB));                     // MMA_K
+    CUTE_STATIC_ASSERT_V(size<2>(tCrA) == size<2>(tCrB));                    // MMA_K
     Tensor tCrB_copy_view = smem_thr_copy_B.retile_D(tCrB);
     CUTE_STATIC_ASSERT_V(size<1>(tCsB) == size<1>(tCrB_copy_view));            // N
     cute::copy(smem_tiled_copy_B, tCsB(_, _, _0{}), tCrB_copy_view(_, _, _0{}));
@@ -263,6 +263,16 @@ __forceinline__ __device__ void gemm_rs(Tensor0 &acc, Tensor1 &tCrA, Tensor2 &tC
         }
         cute::gemm(tiled_mma, tCrA(_, _, i), tCrB(_, _, i), acc);
     }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+template<typename Tensor0, typename Tensor1, typename Tensor2, typename TiledMma>
+__forceinline__ __device__ void gemm_rr(Tensor0 &acc, Tensor1 &tCrA, Tensor2 &tCrB, TiledMma tiled_mma) {
+    CUTE_STATIC_ASSERT_V(size<1>(tCrA) == size<1>(acc));                     // MMA_M
+    CUTE_STATIC_ASSERT_V(size<1>(tCrB) == size<2>(acc));                     // MMA_N
+    CUTE_STATIC_ASSERT_V(size<2>(tCrA) == size<2>(tCrB));                    // MMA_K
+    cute::gemm(tiled_mma, tCrA, tCrB, acc);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -434,6 +444,36 @@ __forceinline__ __device__ void copy_reg_to_global(Tensor<Engine0, Layout0> cons
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+
+template <typename Kernel_traits, bool Is_even_MN = true, bool Is_even_K = true,
+          typename Engine0, typename Layout0, typename Engine1, typename Layout1>
+__forceinline__ __device__ void copy_reg_to_global4x4fp32(Tensor<Engine0, Layout0> const &S,
+                            Tensor<Engine1, Layout1> &D, const int &d, const int max_MN=0) {
+    CUTE_STATIC_ASSERT_V(rank(S) == Int<2>{});
+    CUTE_STATIC_ASSERT_V(rank(D) == Int<2>{});
+    CUTE_STATIC_ASSERT_V(size<0>(S) == size<0>(D));
+    CUTE_STATIC_ASSERT_V(size<0>(S) == _16{});
+    CUTE_STATIC_ASSERT_V(size<1>(S) == size<1>(D));                     // MMA_K
+    typedef __NATIVE_VECTOR__(4, int) VecType;
+    constexpr int kAtomLayoutMO = Kernel_traits::kAtomLayoutMO;
+    const int tidx = threadIdx.x;
+    const int warp_idx = tidx / 64;
+    const int lane_idx = tidx % 64;
+    int row_idx = warp_idx % kAtomLayoutMO * 16 + lane_idx % 16;
+    #pragma unroll
+    for (int k = 0; k < size<1>(S); ++k) {
+        #pragma unroll
+        for (int m = 0; m < 4; ++m) {
+            int col_idx = lane_idx / 16 * 16 + k * 128 + m * 4;
+            auto D_ptr = (VecType *)(reinterpret_cast<int32_t *>(&D(4*m, k)));
+            auto S_ptr = (VecType const *)(reinterpret_cast<int32_t const *>(&S(4*m, k)));
+            bool col_mask = Is_even_K || col_idx < d;
+            bool row_mask = Is_even_MN || row_idx < max_MN;
+            __builtin_mxc_stg_b128_predicator(D_ptr, 0, S_ptr[0], true, false, false, col_mask && row_mask, 1, MACA_ICMP_EQ);
+        }
+    }
+}
+
 
 template <bool Is_even_K = true,
           typename Engine0, typename Layout0, typename Engine1, typename Layout1,
@@ -622,7 +662,8 @@ __forceinline__ __device__ void copy_b128_page_one(Tensor<Engine0, Layout0> cons
     CUTE_STATIC_ASSERT_V(size<2>(S) == size<2>(D));                     // MMA_K
     constexpr int kBlockN = Kernel_traits::kBlockN;
     constexpr int kNThreads = Kernel_traits::kNThreads;
-    constexpr int kGmemThreadsPerRow = Kernel_traits::kBlockKSmem / 8;
+    constexpr int kElementPerThread = 8;
+    constexpr int kGmemThreadsPerRow = Kernel_traits::kBlockKSmem / kElementPerThread;
     constexpr int kGmemRowsPerThread = 1;
     // load 1x8 per thread
     int tidx = threadIdx.x;
@@ -632,7 +673,7 @@ __forceinline__ __device__ void copy_b128_page_one(Tensor<Engine0, Layout0> cons
     for (int m = 0; m < size<1>(S); ++m) {
         bool row_mask = Is_even_MN || get<0>(identity_MN(0, m, 0)) < max_MN;
         const int row_offset = tidx / kGmemThreadsPerRow * kGmemRowsPerThread + kNThreads / kGmemThreadsPerRow * m + n_block * kBlockN;
-        const int col_offset = tidx % kGmemThreadsPerRow * 8;
+        const int col_offset = tidx % kGmemThreadsPerRow * kElementPerThread;
         const int global_kv_page_offset = flash::resolve_thread_kv_page_slice_offset(page_block_size, block_table, page_stride, row_stride, row_offset, col_offset);
         #pragma unroll
         for (int k = 0; k < size<2>(S); ++k) {
@@ -671,7 +712,8 @@ __forceinline__ __device__ void copy_b64_page_one(Tensor<Engine0, Layout0> const
     CUTE_STATIC_ASSERT_V(size<2>(S) == size<2>(D));                     // MMA_K
     constexpr int kBlockN = Kernel_traits::kBlockN;
     constexpr int kNThreads = Kernel_traits::kNThreads;
-    constexpr int kGmemThreadsPerRow = Kernel_traits::kBlockKSmem / 4;
+    constexpr int kElementPerThread = 4;
+    constexpr int kGmemThreadsPerRow = Kernel_traits::kBlockKSmem / kElementPerThread;
     constexpr int kGmemRowsPerThread = 1;
     // load 1x4 per thread
     int tidx = threadIdx.x;
@@ -681,7 +723,7 @@ __forceinline__ __device__ void copy_b64_page_one(Tensor<Engine0, Layout0> const
     for (int m = 0; m < size<1>(S); ++m) {
         bool row_mask = Is_even_MN || get<0>(identity_MN(0, m, 0)) < max_MN;
         const int row_offset = tidx / kGmemThreadsPerRow * kGmemRowsPerThread + kNThreads / kGmemThreadsPerRow * m + n_block * kBlockN;
-        const int col_offset = tidx % kGmemThreadsPerRow * 4;
+        const int col_offset = tidx % kGmemThreadsPerRow * kElementPerThread;
         const int global_kv_page_offset = flash::resolve_thread_kv_page_slice_offset(page_block_size, block_table, page_stride, row_stride, row_offset, col_offset);
         #pragma unroll
         for (int k = 0; k < size<2>(S); ++k) {
@@ -694,6 +736,109 @@ __forceinline__ __device__ void copy_b64_page_one(Tensor<Engine0, Layout0> const
                 *dst_ptr = __builtin_mxc_ldg_b64_predicator(src_ptr, 0, true, true, false, false,
                                                          row_mask && col_mask, 1, MACA_ICMP_EQ);
             }
+        }
+    }
+}
+
+template <typename Kernel_traits, bool Is_even_MN=true, bool Is_even_K=true, typename Engine0, typename Layout0,
+          typename Engine1, typename Layout1, typename Engine2, typename Layout2, typename Engine3, typename Layout3>
+__forceinline__ __device__ void copy_b32_page_one(Tensor<Engine0, Layout0> const &S_base,
+                                          Tensor<Engine1, Layout1> &S,
+                                          Tensor<Engine2, Layout2> &D,
+                                          Tensor<Engine3, Layout3> const &identity_MN,
+                                          const int d,
+                                          const int n_block,
+                                          const int *block_table,
+                                          const int page_stride,
+                                          const int row_stride,
+                                          const int page_block_size,
+                                          const int max_MN=0) {
+    CUTE_STATIC_ASSERT_V(rank(S) == Int<3>{});
+    CUTE_STATIC_ASSERT_V(rank(D) == Int<3>{});
+    CUTE_STATIC_ASSERT_V(size<0>(S) == size<0>(D));                     // MMA
+    CUTE_STATIC_ASSERT_V(size<1>(S) == size<1>(D));                     // MMA_M
+    CUTE_STATIC_ASSERT_V(size<2>(S) == size<2>(D));                     // MMA_K
+    constexpr int kBlockN = Kernel_traits::kBlockN;
+    constexpr int kNThreads = Kernel_traits::kNThreads;
+    constexpr int kElementPerThread = 2;
+    constexpr int kGmemThreadsPerRow = Kernel_traits::kBlockKSmem / kElementPerThread;
+    constexpr int kGmemRowsPerThread = 1;
+    // load 1x2 per thread
+    int tidx = threadIdx.x;
+
+    typedef __NATIVE_VECTOR__(1, int) VecType;
+    #pragma unroll
+    for (int m = 0; m < size<1>(S); ++m) {
+        bool row_mask = Is_even_MN || get<0>(identity_MN(0, m, 0)) < max_MN;
+        const int row_offset = tidx / kGmemThreadsPerRow * kGmemRowsPerThread + kNThreads / kGmemThreadsPerRow * m + n_block * kBlockN;
+        const int col_offset = tidx % kGmemThreadsPerRow * kElementPerThread;
+        const int global_kv_page_offset = flash::resolve_thread_kv_page_slice_offset(page_block_size, block_table, page_stride, row_stride, row_offset, col_offset);
+        #pragma unroll
+        for (int k = 0; k < size<2>(S); ++k) {
+            auto src_ptr = (VecType *)(S_base.data().get() + global_kv_page_offset + get<2>(S.stride()) * k);
+            auto dst_ptr = (VecType *)(D(_, m, k).data());          // rf
+            bool col_mask = Is_even_K || get<1>(identity_MN(0, 0, k)) < d;
+            if constexpr (Is_even_MN && Is_even_K) {
+                *dst_ptr = __builtin_mxc_ldg_b32(src_ptr, 0, -1, true, true, false, false);
+            } else {
+                *dst_ptr = __builtin_mxc_ldg_b32_predicator(src_ptr, 0, true, true, false, false,
+                                                         row_mask && col_mask, 1, MACA_ICMP_EQ);
+            }
+        }
+    }
+}
+
+template<typename Tensor0, typename Tensor1, typename Tensor2>
+__forceinline__ __device__ void concat(Tensor0 &lhs, Tensor1 &rhs, Tensor2 &out) {
+    CUTE_STATIC_ASSERT_V(rank(lhs) == Int<3>{});
+    CUTE_STATIC_ASSERT_V(rank(rhs) == Int<3>{});
+    CUTE_STATIC_ASSERT_V(rank(out) == Int<3>{});
+    CUTE_STATIC_ASSERT_V(size<0>(lhs) == size<0>(rhs));                     // MMA
+    CUTE_STATIC_ASSERT_V(size<0>(lhs) == size<0>(out));                     // MMA
+    CUTE_STATIC_ASSERT_V(size<1>(lhs) == size<1>(rhs));                     // MMA_M
+    CUTE_STATIC_ASSERT_V(size<1>(lhs) == size<1>(out));                     // MMA_M
+    CUTE_STATIC_ASSERT_V(size<2>(lhs) + size<2>(rhs) == size<2>(out));      // MMA_K
+    #pragma unroll
+    for (int k = 0; k < size<2>(lhs); k++) {
+        #pragma unroll
+        for (int m = 0; m < size<1>(out); m++) {
+            #pragma unroll
+            for (int i = 0; i < size<0>(out); i++) {
+                out(i, m, k) = lhs(i, m, k);
+            }
+        }
+    }
+
+    #pragma unroll
+    for (int k = 0; k < size<2>(rhs); k++) {
+        #pragma unroll
+        for (int m = 0; m < size<1>(out); m++) {
+            #pragma unroll
+            for (int i = 0; i < size<0>(out); i++) {
+                out(i, m, k + size<2>(lhs)) = rhs(i, m, k);
+            }
+        }
+    }
+
+}
+
+template<typename Tensor0, typename Tensor1>
+__forceinline__ __device__ void lds4x4_with_swizzle424(Tensor0 const& tCsA, Tensor1& tCrA) {
+    CUTE_STATIC_ASSERT_V(size<0>(tCsA) == size<0>(tCrA));
+    CUTE_STATIC_ASSERT_V(size<1>(tCsA) == (size<1, 1>(tCrA)));
+    CUTE_STATIC_ASSERT_V((size<1, 0>(tCrA)) == _4{});
+    const int lane_idx = threadIdx.x % 64;
+    const int Vt_swizzle_row = lane_idx / 16 * 4;
+    const int Vt_swizzle_col = lane_idx % 16;
+
+    #pragma unroll
+    for (int m = 0; m < size<1>(tCsA); m++) {
+        uint64_t* src_ptr = reinterpret_cast<uint64_t *>(&tCsA(0, m));
+        #pragma unroll
+        for (int row = 0; row < 4; row++) {
+            int col_idx = Vt_swizzle_col ^ (Vt_swizzle_row + row);
+            uint64_t* dst_ptr = reinterpret_cast<uint64_t *>(&tCrA(0, make_coord(row, m), 0));
+            *dst_ptr = *(src_ptr + row * 16 + col_idx);
         }
     }
 }
@@ -719,6 +864,48 @@ int resolve_thread_kv_page_slice_offset(const int tidx, const int n_block_max, c
     return block_table[virtual_page_idx] * page_stride
         + page_offset * row_stride
         + col_offset;
+}
+
+template <typename Engine, typename Layout>
+__forceinline__ __device__ decltype(auto) permute_4x4_b16(Tensor<Engine, Layout> &t) {
+    using data_type = typename Engine::value_type;
+    Tensor tPerm = make_tensor<data_type>(Shape<_4, _4>{});
+    uint32_t v1, v2;
+    uint32_t *dest;
+
+    #pragma unroll
+    for (int i = 0; i < size<2>(t); ++i) {
+        v1 = *(reinterpret_cast<uint32_t *>(t(_, 0, i).data()));
+        v2 = *(reinterpret_cast<uint32_t *>(t(_, 1, i).data()));
+        dest = reinterpret_cast<uint32_t *>(tPerm(_, 0).data());
+        *dest = __builtin_mxc_byte_perm(v2, v1, 0x05040100);
+        dest = reinterpret_cast<uint32_t *>(tPerm(_, 1).data());
+        *dest = __builtin_mxc_byte_perm(v2, v1, 0x07060302);
+
+        v1 = *(reinterpret_cast<uint32_t *>(t(_, 0, i).data()) + 1);
+        v2 = *(reinterpret_cast<uint32_t *>(t(_, 1, i).data()) + 1);
+        dest = reinterpret_cast<uint32_t *>(tPerm(_, 2).data());
+        *dest = __builtin_mxc_byte_perm(v2, v1, 0x05040100);
+        dest = reinterpret_cast<uint32_t *>(tPerm(_, 3).data());
+        *dest = __builtin_mxc_byte_perm(v2, v1, 0x07060302);
+
+        v1 = *(reinterpret_cast<uint32_t *>(t(_, 2, i).data()));
+        v2 = *(reinterpret_cast<uint32_t *>(t(_, 3, i).data()));
+        dest = reinterpret_cast<uint32_t *>(tPerm(_, 0).data()) + 1;
+        *dest = __builtin_mxc_byte_perm(v2, v1, 0x05040100);
+        dest = reinterpret_cast<uint32_t *>(tPerm(_, 1).data()) + 1;
+        *dest = __builtin_mxc_byte_perm(v2, v1, 0x07060302);
+
+        v1 = *(reinterpret_cast<uint32_t *>(t(_, 2, i).data()) + 1);
+        v2 = *(reinterpret_cast<uint32_t *>(t(_, 3, i).data()) + 1);
+        dest = reinterpret_cast<uint32_t *>(tPerm(_, 2).data()) + 1;
+        *dest = __builtin_mxc_byte_perm(v2, v1, 0x05040100);
+        dest = reinterpret_cast<uint32_t *>(tPerm(_, 3).data()) + 1;
+        *dest = __builtin_mxc_byte_perm(v2, v1, 0x07060302);
+
+        cute::copy(tPerm, t(_, _, i));
+    }
+    return t;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////

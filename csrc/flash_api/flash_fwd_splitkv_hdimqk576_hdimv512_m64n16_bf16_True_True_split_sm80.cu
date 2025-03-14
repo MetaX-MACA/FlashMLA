@@ -6,12 +6,12 @@
 
 template void run_flash_splitkv_fwd_template<
                 576,
-                32,
+                64,
                 16,
-                4,
+                8,
                 true,
                 true,
-                cutlass::half_t,
+                cutlass::bfloat16_t,
                 true,
                 512,
                 2

@@ -188,6 +188,10 @@ if not SKIP_CUDA_BUILD:
                 "csrc/flash_api/flash_fwd_splitkv_hdimqk576_hdimv512_m32n16_bf16_True_True_split_sm80.cu",
                 "csrc/flash_api/flash_fwd_splitkv_hdimqk576_hdimv512_m32n16_fp16_True_True_sm80.cu",
                 "csrc/flash_api/flash_fwd_splitkv_hdimqk576_hdimv512_m32n16_fp16_True_True_split_sm80.cu",
+                "csrc/flash_api/flash_fwd_splitkv_hdimqk576_hdimv512_m64n16_bf16_True_True_sm80.cu",
+                "csrc/flash_api/flash_fwd_splitkv_hdimqk576_hdimv512_m64n16_bf16_True_True_split_sm80.cu",
+                "csrc/flash_api/flash_fwd_splitkv_hdimqk576_hdimv512_m64n16_fp16_True_True_sm80.cu",
+                "csrc/flash_api/flash_fwd_splitkv_hdimqk576_hdimv512_m64n16_fp16_True_True_split_sm80.cu",
             ],
             extra_compile_args={
                 "cxx": ["-O3", "-std=c++17", "-w"] + generator_flag,

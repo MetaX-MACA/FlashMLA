@@ -20,7 +20,8 @@ template<
     bool Share_Q_K_smem,
     typename elem_type,
     bool Is_splits = false,
-    int kHeadDimV = kHeadDim
+    int kHeadDimV = kHeadDim,
+    int Num_Stages = 1
 >
 void run_flash_splitkv_fwd_template(Flash_fwd_mla_params &params, cudaStream_t stream);
 
@@ -34,10 +35,19 @@ namespace mcFlashAttn {
         constexpr static int HeaddimQK = 576;
         constexpr static int HeaddimVO = 512;
 
-        constexpr static int kBlockM = 32;
-        constexpr static int kBlockN = 16;
+        constexpr static int Num_Stages = 2;
         FP16_SWITCH(!params.is_bf16, [&] {
-            run_flash_splitkv_fwd_template<HeaddimQK, kBlockM, kBlockN, 4, true, true, elem_type, false, HeaddimVO>(params, stream);
+            if (params.seqlen_q >= 64) {
+                constexpr static int kBlockM = 64;
+                constexpr static int kBlockN = 16;
+                constexpr static int kNWarps = 8;
+                run_flash_splitkv_fwd_template<HeaddimQK, kBlockM, kBlockN, kNWarps, true, true, elem_type, false, HeaddimVO, Num_Stages>(params, stream);
+            } else {
+                constexpr static int kBlockM = 32;
+                constexpr static int kBlockN = 16;
+                constexpr static int kNWarps = 4;
+                run_flash_splitkv_fwd_template<HeaddimQK, kBlockM, kBlockN, kNWarps, true, true, elem_type, false, HeaddimVO, Num_Stages>(params, stream);
+            }
         });
     }
 
