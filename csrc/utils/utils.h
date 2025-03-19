@@ -236,10 +236,7 @@ __forceinline__ __device__ void gemm_opt(Tensor0 &acc, Tensor1 &tCrA, Tensor2 &t
             if (!A_in_regs) { cute::copy(smem_tiled_copy_A, tCsA(_, _, i + 1), tCrA_copy_view(_, _, i + 1)); }
             if (!B_in_regs) { cute::copy(smem_tiled_copy_B, tCsB(_, _, i + 1), tCrB_copy_view(_, _, i + 1)); }
         }
-        //ToDo: remove this after compiler has been updated
-        __builtin_mxc_schedbound_begin();
         cute::gemm(tiled_mma, tCrA(_, _, i), tCrB(_, _, i), acc);
-        __builtin_mxc_schedbound_end();
     }
 }
 
@@ -631,12 +628,12 @@ __forceinline__ __device__ void apply_softcap(Tensor<Engine, Layout> &tensor, co
 // resolves offset of a slice of a paged kv copy from gmem.
 // assumes that the tensor has already been positioned at the correct head.
 __forceinline__ __device__
-int resolve_thread_kv_page_slice_offset(const int page_block_size, const int* block_table, const int page_stride, const int row_stride, const int row_offset, const int col_offset) {
+int64_t resolve_thread_kv_page_slice_offset(const int page_block_size, const int* block_table, const int page_stride, const int row_stride, const int row_offset, const int col_offset) {
     const int virtual_page_idx = row_offset / page_block_size;
     const int page_offset = row_offset - virtual_page_idx * page_block_size;
 
-    return block_table[virtual_page_idx] * page_stride
-        + page_offset * row_stride
+    return ((int64_t) block_table[virtual_page_idx]) * ((int64_t) page_stride)
+        + page_offset * ((int64_t) row_stride)
         + col_offset;
 }
 
@@ -674,7 +671,7 @@ __forceinline__ __device__ void copy_b128_page_one(Tensor<Engine0, Layout0> cons
         bool row_mask = Is_even_MN || get<0>(identity_MN(0, m, 0)) < max_MN;
         const int row_offset = tidx / kGmemThreadsPerRow * kGmemRowsPerThread + kNThreads / kGmemThreadsPerRow * m + n_block * kBlockN;
         const int col_offset = tidx % kGmemThreadsPerRow * kElementPerThread;
-        const int global_kv_page_offset = flash::resolve_thread_kv_page_slice_offset(page_block_size, block_table, page_stride, row_stride, row_offset, col_offset);
+        const int64_t global_kv_page_offset = flash::resolve_thread_kv_page_slice_offset(page_block_size, block_table, page_stride, row_stride, row_offset, col_offset);
         #pragma unroll
         for (int k = 0; k < size<2>(S); ++k) {
             auto src_ptr = (VecType *)(S_base.data().get() + global_kv_page_offset + get<2>(S.stride()) * k);
@@ -724,7 +721,7 @@ __forceinline__ __device__ void copy_b64_page_one(Tensor<Engine0, Layout0> const
         bool row_mask = Is_even_MN || get<0>(identity_MN(0, m, 0)) < max_MN;
         const int row_offset = tidx / kGmemThreadsPerRow * kGmemRowsPerThread + kNThreads / kGmemThreadsPerRow * m + n_block * kBlockN;
         const int col_offset = tidx % kGmemThreadsPerRow * kElementPerThread;
-        const int global_kv_page_offset = flash::resolve_thread_kv_page_slice_offset(page_block_size, block_table, page_stride, row_stride, row_offset, col_offset);
+        const int64_t global_kv_page_offset = flash::resolve_thread_kv_page_slice_offset(page_block_size, block_table, page_stride, row_stride, row_offset, col_offset);
         #pragma unroll
         for (int k = 0; k < size<2>(S); ++k) {
             auto src_ptr = (VecType *)(S_base.data().get() + global_kv_page_offset + get<2>(S.stride()) * k);
@@ -772,7 +769,7 @@ __forceinline__ __device__ void copy_b32_page_one(Tensor<Engine0, Layout0> const
         bool row_mask = Is_even_MN || get<0>(identity_MN(0, m, 0)) < max_MN;
         const int row_offset = tidx / kGmemThreadsPerRow * kGmemRowsPerThread + kNThreads / kGmemThreadsPerRow * m + n_block * kBlockN;
         const int col_offset = tidx % kGmemThreadsPerRow * kElementPerThread;
-        const int global_kv_page_offset = flash::resolve_thread_kv_page_slice_offset(page_block_size, block_table, page_stride, row_stride, row_offset, col_offset);
+        const int64_t global_kv_page_offset = flash::resolve_thread_kv_page_slice_offset(page_block_size, block_table, page_stride, row_stride, row_offset, col_offset);
         #pragma unroll
         for (int k = 0; k < size<2>(S); ++k) {
             auto src_ptr = (VecType *)(S_base.data().get() + global_kv_page_offset + get<2>(S.stride()) * k);
@@ -841,29 +838,6 @@ __forceinline__ __device__ void lds4x4_with_swizzle424(Tensor0 const& tCsA, Tens
             *dst_ptr = *(src_ptr + row * 16 + col_idx);
         }
     }
-}
-
-
-// resolves offset of a slice of a paged kv copy from gmem.
-// assumes that the tensor has already been positioned at the correct head.
-template <typename Kernel_traits>
-__forceinline__ __device__
-int resolve_thread_kv_page_slice_offset(const int tidx, const int n_block_max, const int page_block_size,
-                            const int* block_table, const int page_stride, const int row_stride, const int row_idx = 0) {
-    constexpr int kGmemThreadsPerRow = Kernel_traits::kGmemThreadsPerRow;
-    constexpr int kGmemRowsPerThread = Kernel_traits::kGmemRowsPerThread;
-    constexpr int kGmemElemsPerLoad = Kernel_traits::kGmemElemsPerLoad;
-    constexpr int kBlockN = Kernel_traits::kBlockN;
-
-    const int col_offset = tidx % kGmemThreadsPerRow * kGmemElemsPerLoad;
-    const int block_row_offset = tidx / kGmemThreadsPerRow * kGmemRowsPerThread;
-    const int global_row_offset = block_row_offset + (n_block_max - 1) * kBlockN;
-    const int page_offset = global_row_offset % page_block_size;
-    const int virtual_page_idx = global_row_offset / page_block_size + row_idx;
-
-    return block_table[virtual_page_idx] * page_stride
-        + page_offset * row_stride
-        + col_offset;
 }
 
 template <typename Engine, typename Layout>

@@ -145,7 +145,7 @@ mha_fwd_kvcache_mla(
     at::Tensor vcache = vcache_.has_value() ? vcache_.value() : kcache;
 
     auto q_dtype = q.dtype();
-    TORCH_CHECK(q_dtype == torch::kBFloat16);
+    TORCH_CHECK(q_dtype == torch::kBFloat16 || q_dtype == torch::kFloat16);
     TORCH_CHECK(kcache.dtype() == q_dtype, "query and key must have the same dtype");
 
     CHECK_DEVICE(q); CHECK_DEVICE(kcache); CHECK_DEVICE(vcache);
@@ -259,7 +259,7 @@ mha_fwd_kvcache_mla(
 
     auto stream = at::cuda::getCurrentCUDAStream().stream();
     TORCH_CHECK(head_size == 576);
-    params.is_bf16 = true;
+    params.is_bf16 = q_dtype == torch::kBFloat16;
     run_mha_fwd(params,stream, /*force_split_kernel*/true);
     out = out.view({batch_size, seqlen_q_ori, ngroups, num_heads_k, head_size_v}).transpose(2, 3)
             .reshape({batch_size, seqlen_q_ori, num_heads_ori, head_size_v});

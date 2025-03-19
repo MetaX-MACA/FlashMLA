@@ -160,7 +160,7 @@ struct Flash_fwd_kernel_traits : public Base {
     static constexpr int kSmemKSize = size(SmemLayoutK{}) * sizeof(Element);
     static constexpr int kSmemVSize = size(SmemLayoutV{}) * sizeof(Element);
     static constexpr int kSmemKVSize = kSmemKSize + kSmemVSize;
-    static constexpr int kSmemSize = Share_Q_K_smem ? std::max(std::min(kSmemQSize, 64 * 1024), kSmemKSize) : kSmemQSize + kSmemKSize;
+    static constexpr int kSmemSize = Share_Q_K_smem ? std::max(std::min((Is_Splits_ ? 2 : 1) * kSmemQSize, 64 * 1024), kSmemKSize) : kSmemQSize + kSmemKSize;
     static constexpr int kRegSize = kSmemSize / sizeof(uint32_t) / kNThreads;
 
     static constexpr int kGmemElemsPerLoadB128 = sizeof(cute::uint128_t) / sizeof(Element);
@@ -222,7 +222,7 @@ struct Flash_fwd_kernel_traits : public Base {
                Stride< _16, _1>>
     >;
     using GmemTiledCopyOaccum = decltype(
-        make_tiled_copy(Copy_Atom<DefaultCopy, ElementAccum>{},
+        make_tiled_copy(Copy_Atom<UniversalCopy<uint128_t>, ElementAccum>{},
                         GmemLayoutAtomOaccum{},
                         Layout<Shape < _1, _4>>{}));  // Val layout, 4 vals per store
 };

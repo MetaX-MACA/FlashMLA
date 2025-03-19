@@ -37,17 +37,19 @@ namespace mcFlashAttn {
 
         constexpr static int Num_Stages = 2;
         FP16_SWITCH(!params.is_bf16, [&] {
-            if (params.seqlen_q >= 64) {
-                constexpr static int kBlockM = 64;
-                constexpr static int kBlockN = 16;
-                constexpr static int kNWarps = 8;
-                run_flash_splitkv_fwd_template<HeaddimQK, kBlockM, kBlockN, kNWarps, true, true, elem_type, false, HeaddimVO, Num_Stages>(params, stream);
-            } else {
-                constexpr static int kBlockM = 32;
-                constexpr static int kBlockN = 16;
-                constexpr static int kNWarps = 4;
-                run_flash_splitkv_fwd_template<HeaddimQK, kBlockM, kBlockN, kNWarps, true, true, elem_type, false, HeaddimVO, Num_Stages>(params, stream);
-            }
+            BOOL_SWITCH(params.num_splits > 1, Is_splits, [&] {
+                if (params.seqlen_q >= 64) {
+                    constexpr static int kBlockM = 64;
+                    constexpr static int kBlockN = 16;
+                    constexpr static int kNWarps = 8;
+                    run_flash_splitkv_fwd_template<HeaddimQK, kBlockM, kBlockN, kNWarps, true, true, elem_type, Is_splits, HeaddimVO, Num_Stages>(params, stream);
+                } else {
+                    constexpr static int kBlockM = 32;
+                    constexpr static int kBlockN = 16;
+                    constexpr static int kNWarps = 4;
+                    run_flash_splitkv_fwd_template<HeaddimQK, kBlockM, kBlockN, kNWarps, true, true, elem_type, Is_splits, HeaddimVO, Num_Stages>(params, stream);
+                }
+            });
         });
     }
 

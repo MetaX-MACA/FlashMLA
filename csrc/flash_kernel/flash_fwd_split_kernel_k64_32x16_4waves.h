@@ -363,14 +363,13 @@ __forceinline__ __device__ void compute_attn_1rowblock_splitkv_k64_mla_32x16_4wa
     }
     // if (cute::thread0()) { print(lse); }
     if constexpr (!Split) {
-        // use smem for O (mtreg->smem->mtreg->global)
         Tensor sOaccum = make_tensor(make_smem_ptr(reinterpret_cast<ElementO *>(smem_)), typename Kernel_traits::SmemLayoutO{}); // (SMEM_M,SMEM_N)
         // Partition sO to match the accumulator partitioning
         using SmemTiledCopyO = typename Kernel_traits::SmemCopyAtomO;
         CONVERT_TENSOR_TYPE(ElementAccum, ElementO, acc_o_copy, rO)
         int warp_offset = warp_idx * 16 * 64;
         int thread_offset = lane_idx % 16 * 64 + lane_idx / 16 * 16;
-        Element *Osmem_ptr_sts = reinterpret_cast<ElementO *>(smem_) + warp_offset + thread_offset;
+        ElementO *Osmem_ptr_sts = reinterpret_cast<ElementO *>(smem_) + warp_offset + thread_offset;
         Tensor tOsO = make_tensor(make_smem_ptr(Osmem_ptr_sts), make_layout(Shape<_16, _4>{},
                                                                           Stride<_1, Int<16*64*kNWarps>>{}));
         Tensor tOrO = make_tensor(rO.data(), make_layout(Shape<_16, _4>{},
@@ -427,27 +426,47 @@ __forceinline__ __device__ void compute_attn_1rowblock_splitkv_k64_mla_32x16_4wa
             tOrOaccum, tOgOaccum, tOcO, params.d_v, binfo.actual_seqlen_q - m_block * kBlockM
         );
     } else {
-        // don't use smem for O (mtreg->global)
+        Tensor sOaccum = make_tensor(make_smem_ptr(reinterpret_cast<ElementO *>(smem_)), typename Kernel_traits::SmemLayoutO{}); // (SMEM_M,SMEM_N)
         const index_t row_offset_oaccum = (((n_split_idx * params.b + bidb) * params.h + bidh) * params.seqlen_q
                                             + m_block * kBlockM) * params.d_v;
         const index_t row_offset_lseaccum = ((n_split_idx * params.b + bidb) * params.h + bidh) * params.seqlen_q + m_block * kBlockM;
 
-        // Tensor gOaccum = make_tensor(make_gmem_ptr(reinterpret_cast<ElementO *>(params.oaccum_ptr) + row_offset_oaccum),
-        //                             Shape<Int<kBlockM>, Int<kHeadDimV>>{},
-        //                             make_stride(kHeadDimV, _1{}));
+        Tensor gOaccum = make_tensor(make_gmem_ptr(reinterpret_cast<ElementO *>(params.oaccum_ptr) + row_offset_oaccum),
+                                    Shape<Int<kBlockM>, Int<kHeadDimV>>{},
+                                    make_stride(kHeadDimV, _1{}));
         Tensor gLSEaccum = make_tensor(make_gmem_ptr(reinterpret_cast<ElementAccum *>(params.softmax_lseaccum_ptr) + row_offset_lseaccum),
                                     Shape<Int<kBlockM>>{}, Stride<_1>{});
         // if (tidx == 0) { printf("row_offset_o = %d, bidh = %d, gOaccum = %p\n", row_offset_o, bidh, gOaccum.data()); }
-        Tensor taccOrOaccum = make_tensor(acc_o_copy.data(), make_layout(Shape<_16, _4>{},
-                                                                    Stride<_1, _16>{}));
-        int warp_offset = warp_idx / kAtomLayoutMO * 64 + warp_idx % kAtomLayoutMO * 16 * kHeadDimV;
-        int thread_offset = lane_idx % 16 * kHeadDimV + lane_idx / 16 * 16;
-        ElementO *Osmem_ptr_stg = reinterpret_cast<ElementO *>(params.oaccum_ptr) + row_offset_oaccum + warp_offset + thread_offset;
-        Tensor taccOgOaccum = make_tensor(make_gmem_ptr(Osmem_ptr_stg), make_layout(Shape<_16, _4>{},
-                                                                          Stride<_1, Int<128>>{}));
-        // Tensor taccOgOaccum = gmem_thr_copy_Oaccum.partition_D(gOaccum);
+        Tensor taccOrOaccum = make_tensor(acc_o_copy.data(), acc_o_copy.layout());
 
+        int warp_offset = warp_idx * 16 * 64;
+        int thread_offset = lane_idx % 16 * 64 + lane_idx / 16 * 16;
+        ElementO *accOsmem_ptr_sts = reinterpret_cast<ElementO *>(smem_) + warp_offset + thread_offset;
+        Tensor taccOsOaccum = make_tensor(make_smem_ptr(accOsmem_ptr_sts), make_layout(Shape<_4, _4, _4>{},
+                                                                          Stride<_1, _4, Int<16*64*kNWarps>>{}));
 
+        if constexpr (Kernel_traits::Share_Q_K_smem) { flash::sync_threads(); }
+        int O_swizzle_row_sts = tidx % 4;
+        #pragma unroll
+        for (int i = 0; i < 4; i++) {
+            cute::copy(taccOrOaccum(_, make_coord(i, _)), taccOsOaccum(_, O_swizzle_row_sts ^ i, _));
+        }
+
+        GmemTiledCopyO gmem_tiled_copy_Oaccum;
+        auto gmem_thr_copy_Oaccum = gmem_tiled_copy_Oaccum.get_thread_slice(tidx);
+        // Tensor tOsOaccum = gmem_thr_copy_Oaccum.partition_S(sOaccum);        // ((Atom,AtomNum),ATOM_M,ATOM_N)
+        int O_swizzle_row_lds = tidx / 16 % 4;
+        int O_swizzle_col_lds = tidx % 16 % 4;
+        int O_swizzle_col_lds_new = O_swizzle_col_lds ^ O_swizzle_row_lds;
+        ElementO *accOsmem_ptr_lds = reinterpret_cast<ElementO *>(smem_) + (tidx + O_swizzle_col_lds_new - O_swizzle_col_lds) * 4;
+        Tensor tOsOaccum = make_tensor(make_smem_ptr(accOsmem_ptr_lds), make_layout(Shape<_4, _2, Int<kHeadDimV/64>>{},
+                                                                          Stride<_1, Int<16*64>, Int<16*64*2>>{}));
+        Tensor tOgOaccum = gmem_thr_copy_Oaccum.partition_D(gOaccum);
+
+        flash::sync_threads();
+
+        Tensor tOrOaccum = make_tensor<ElementO>(shape(tOgOaccum));
+        cute::copy(gmem_tiled_copy_Oaccum, tOsOaccum, tOrOaccum);
 
         Tensor caccO = make_identity_tensor(Shape<Int<kBlockM>, Int<kHeadDimV>>{});    // (BLK_M,BLK_K) -> (blk_m,blk_k)
         Tensor taccOcO = thr_mma_o.partition_C(caccO);                           // (MMA,MMA_M,MMA_K)
@@ -463,9 +482,12 @@ __forceinline__ __device__ void compute_attn_1rowblock_splitkv_k64_mla_32x16_4wa
             }
         }
 
+        Tensor cO = make_identity_tensor(make_shape(size<0>(sOaccum), size<1>(sOaccum)));    // (BLK_M,BLK_K) -> (blk_m,blk_k)
+        // Repeat the partitioning with identity layouts
+        Tensor tOcaccO = gmem_thr_copy_Oaccum.partition_D(cO);                           // (ACPY,ACPY_M,ACPY_K) -> (blk_m,blk_k)
         // Clear_OOB_K must be false since we don't want to write zeros to gmem
-        flash::copy_reg_to_global4x4fp32<Kernel_traits, Is_even_MN, Is_even_K>(
-            taccOrOaccum, taccOgOaccum, params.d_v, binfo.actual_seqlen_q - m_block * kBlockM
+        flash::copy_reg_to_global<Is_even_MN, Is_even_K>(
+            tOrOaccum, tOgOaccum, tOcaccO, params.d_v, binfo.actual_seqlen_q - m_block * kBlockM
         );
     }
 }

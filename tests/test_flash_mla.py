@@ -6,7 +6,6 @@ import torch
 import triton
 import pytest
 
-# from flash_mla import get_mla_metadata, flash_mla_with_kvcache
 from flash_mla import (
     get_mla_metadata,
     flash_mla_with_kvcache
@@ -93,15 +92,11 @@ def test_flash_mla(b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen, block_size
     cal_diff(out_flash, out_torch, "out")
     cal_diff(lse_flash, lse_torch, "lse")
 
-    t = triton.testing.do_bench(flash_mla)
-    FLOPS = s_q * total_seqlens * h_q * (d + dv) * 2
-    bytes = (total_seqlens * h_kv * d + b * s_q * h_q * d + b * s_q * h_q * dv) * (torch.finfo(dtype).bits // 8)
-    print(f"{b}, {s_q}, {mean_sk}, {h_q}, {h_kv}, {d}, {dv}, {causal}, {varlen}, {t:.3f}, {FLOPS / 10 ** 9 / t:.0f}, {bytes / 10 ** 6 / t:.0f}")
 
 
 @pytest.mark.parametrize("b",[128])
 @pytest.mark.parametrize("s_q",[1,2])
-@pytest.mark.parametrize("mean_sk",[4096, 8192])
+@pytest.mark.parametrize("mean_sk",[4096, 8192, 32768])
 @pytest.mark.parametrize("h_q",[16, 32, 64, 128])
 @pytest.mark.parametrize("h_kv",[1])
 @pytest.mark.parametrize("d",[576])
@@ -109,7 +104,14 @@ def test_flash_mla(b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen, block_size
 @pytest.mark.parametrize("causal",[True])
 @pytest.mark.parametrize("varlen",[True,False])
 @pytest.mark.parametrize("block_size",[1,4,16,64])
-def test_flash_mla_checkin(b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen, block_size):
+@pytest.mark.parametrize("dtype",[torch.bfloat16, torch.float16])
+def test_flash_mla_checkin(b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen, block_size, dtype):
+    device = torch.device("cuda:0")
+    torch.set_default_dtype(dtype)
+    torch.set_default_device(device)
+    torch.cuda.set_device(device)
+    torch.manual_seed(0)
+    random.seed(0)
     test_flash_mla(b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen, block_size)
 
 if __name__ == "__main__":
@@ -120,14 +122,13 @@ if __name__ == "__main__":
     torch.cuda.set_device(device)
     torch.manual_seed(0)
     random.seed(0)
-    print(f"batch, seqlen_q, mean_sk, h_q, h_kv, d, dv, causal, varlen, time(ms), TFLOPS, bandwith(GB/s)")
 
     h_kv = 1
     d, dv = 576, 512
     causal = True
     for block_size in [1,4,16,64]:
         for b in [128]:
-            for s in [4096, 8192]:
+            for s in [4096, 8192, 32768]:
                 for h_q in [16, 32, 64, 128]:  # TP = 8, 4, 2, 1
                     for s_q in [1, 2]:  # MTP =1, 2
                         for varlen in [False, True]:
