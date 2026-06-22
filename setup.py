@@ -26,6 +26,12 @@ from torch.utils.cpp_extension import (
     CUDA_HOME,
 )
 
+from build_tools.maca_env import (
+    format_maca_build_env_errors,
+    resolve_maca_build_env,
+    validate_maca_build_env,
+)
+
 
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
@@ -152,10 +158,15 @@ if not SKIP_CUDA_BUILD:
         generator_flag = ["-DOLD_GENERATOR_PATH"]
 
     check_if_cuda_home_none("flash_mla")
+    maca_build_env = resolve_maca_build_env()
+    maca_build_env_errors = validate_maca_build_env(maca_build_env)
+    if maca_build_env_errors:
+        raise RuntimeError(format_maca_build_env_errors(maca_build_env_errors))
+    cuda_home = str(maca_build_env.cuda_path)
     # Check, if CUDA11 is installed for compute capability 8.0
     cc_flag = []
-    if CUDA_HOME is not None:
-        _, bare_metal_version = get_cuda_bare_metal_version(CUDA_HOME)
+    if cuda_home is not None:
+        _, bare_metal_version = get_cuda_bare_metal_version(cuda_home)
         if bare_metal_version < Version("11.6"):
             raise RuntimeError(
                 "FlashAttention is only supported on CUDA 11.6 and above.  "
@@ -163,14 +174,14 @@ if not SKIP_CUDA_BUILD:
             )
     cc_flag.append("-gencode")
     cc_flag.append("arch=compute_80,code=sm_80")
-    if CUDA_HOME is not None:
+    if cuda_home is not None:
         if bare_metal_version >= Version("11.8"):
             cc_flag.append("-gencode")
             cc_flag.append("arch=compute_90,code=sm_90")
 
-    lib_dir = Path(CUDA_HOME).parent.parent / "lib"
-    libraries=["mcblas"]
-    extra_objects = ['{}/lib{}.so'.format(lib_dir, l) for l in libraries]
+    lib_dir = maca_build_env.maca_lib_path
+    libraries = ["mcblas"]
+    extra_objects = [str(lib_dir / f"lib{l}.so") for l in libraries]
     # extra_objects.extend([f for f in obj_lists if f.endswith('.o')])
 
     # HACK: The compiler flag -D_GLIBCXX_USE_CXX11_ABI is set to be the same as
@@ -335,6 +346,7 @@ setup(
             "dist",
             "docs",
             "benchmarks",
+            "build_tools",
             "flash_mla.egg-info",
         )
     ),
