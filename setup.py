@@ -26,6 +26,8 @@ from torch.utils.cpp_extension import (
     CUDA_HOME,
 )
 
+from build_tools.compiler_version import get_cuda_bare_metal_version
+
 
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
@@ -61,16 +63,6 @@ def get_platform():
         return "win_amd64"
     else:
         raise ValueError("Unsupported platform: {}".format(sys.platform))
-
-
-def get_cuda_bare_metal_version(cuda_dir):
-    # raw_output = subprocess.check_output([cuda_dir + "/bin/nvcc", "-V"], universal_newlines=True)
-    # output = raw_output.split()
-    # release_idx = output.index("release") + 1
-    # bare_metal_version = parse(output[release_idx].split(",")[0])
-    raw_output = "nvcc: NVIDIA (R) Cuda compiler driver Copyright (c) 2005-2023 NVIDIA Corporation Built on Mon_Apr__3_17:16:06_PDT_2023 Cuda compilation tools, release 12.1, V12.1.105 Build cuda_12.1.r12.1/compiler.32688072_0"
-    bare_metal_version = Version("12.1")
-    return raw_output, bare_metal_version
 
 
 def check_if_cuda_home_none(global_option: str) -> None:
