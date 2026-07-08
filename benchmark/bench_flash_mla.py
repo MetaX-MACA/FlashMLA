@@ -407,14 +407,18 @@ FUNC_TABLE = {
     "flash_mla_triton": run_flash_mla_triton,
 }
 
-def compare_ab(baseline, target, b, s_q, cache_seqlens, h_q, h_kv, d, dv, causal, dtype):
+def set_benchmark_seed(seed):
+    torch.manual_seed(seed)
+    random.seed(seed)
+
+
+def compare_ab(baseline, target, b, s_q, cache_seqlens, h_q, h_kv, d, dv, causal, dtype, seed=0):
     print(f"comparing {baseline} vs {target}: {b=}, {s_q=}, mean_seqlens={cache_seqlens.float().mean()}, {h_q=}, {h_kv=}, {d=}, {dv=}, {causal=}, {dtype=}")
     device = torch.device("cuda:0")
     torch.set_default_dtype(dtype)
     torch.set_default_device(device)
     torch.cuda.set_device(device)
-    torch.manual_seed(0)
-    random.seed(0)
+    set_benchmark_seed(seed)
     assert baseline in FUNC_TABLE
     assert target in FUNC_TABLE
     baseline_func = FUNC_TABLE[baseline]
@@ -447,14 +451,13 @@ def compare_ab(baseline, target, b, s_q, cache_seqlens, h_q, h_kv, d, dv, causal
     return bytes / 10 ** 6 / perf_a, bytes / 10 ** 6 / perf_b
 
 
-def compare_a(target, b, s_q, cache_seqlens, h_q, h_kv, d, dv, causal, dtype):
+def compare_a(target, b, s_q, cache_seqlens, h_q, h_kv, d, dv, causal, dtype, seed=0):
     print(f"{target}: {b=}, {s_q=}, mean_seqlens={cache_seqlens.float().mean()}, {h_q=}, {h_kv=}, {d=}, {dv=}, {causal=}, {dtype=}")
     torch.set_default_dtype(dtype)
     device = torch.device("cuda:0")
     torch.set_default_device(device)
     torch.cuda.set_device(device)
-    torch.manual_seed(0)
-    random.seed(0)
+    set_benchmark_seed(seed)
     assert target in FUNC_TABLE
     target_func = FUNC_TABLE[target]
 
@@ -497,6 +500,7 @@ def get_args():
     parser.add_argument("--all", action="store_true")
     parser.add_argument("--one", action="store_true")
     parser.add_argument("--compare", action="store_true")
+    parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
     return args
 
@@ -509,12 +513,12 @@ if __name__ == "__main__":
         for shape in shape_configs:
             if args.all:
                 for target in available_targets:
-                    perf = compare_a(target, shape["b"], shape["s_q"], shape["cache_seqlens"], shape["h_q"], shape["h_kv"], shape["d"], shape["dv"], shape["causal"], shape["dtype"])
+                    perf = compare_a(target, shape["b"], shape["s_q"], shape["cache_seqlens"], shape["h_q"], shape["h_kv"], shape["d"], shape["dv"], shape["causal"], shape["dtype"], seed=args.seed)
                     fout.write(f'{target},{shape["b"]},{shape["cache_seqlens"].float().mean().cpu().item():.0f},{shape["h_q"]},{perf:.0f}\n')
             elif args.compare:
-                perfa, prefb = compare_ab(args.baseline, args.target, shape["b"], shape["s_q"], shape["cache_seqlens"], shape["h_q"], shape["h_kv"], shape["d"], shape["dv"], shape["causal"], shape["dtype"])
+                perfa, prefb = compare_ab(args.baseline, args.target, shape["b"], shape["s_q"], shape["cache_seqlens"], shape["h_q"], shape["h_kv"], shape["d"], shape["dv"], shape["causal"], shape["dtype"], seed=args.seed)
                 fout.write(f'{args.baseline},{shape["b"]},{shape["cache_seqlens"].float().mean().cpu().item():.0f},{shape["h_q"]},{perfa:.0f}\n')
                 fout.write(f'{args.target},{shape["b"]},{shape["cache_seqlens"].float().mean().cpu().item():.0f},{shape["h_q"]},{prefb:.0f}\n')
             elif args.one:
-                perf = compare_a(args.target, shape["b"], shape["s_q"], shape["cache_seqlens"], shape["h_q"], shape["h_kv"], shape["d"], shape["dv"], shape["causal"], shape["dtype"])
+                perf = compare_a(args.target, shape["b"], shape["s_q"], shape["cache_seqlens"], shape["h_q"], shape["h_kv"], shape["d"], shape["dv"], shape["causal"], shape["dtype"], seed=args.seed)
                 fout.write(f'{args.target},{shape["b"]},{shape["cache_seqlens"].float().mean().cpu().item():.0f},{shape["h_q"]},{perf:.0f}\n')
