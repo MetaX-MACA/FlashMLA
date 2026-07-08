@@ -484,10 +484,27 @@ available_targets = [
     "flash_mla_triton",
 ]
 
-shape_configs = [
-    {"b": batch, "s_q": 1, "cache_seqlens": torch.tensor([seqlen + 2 * i for i in range(batch)], dtype=torch.int32, device="cuda"), "h_q": head, "h_kv": 1, "d": 512+64, "dv": 512, "causal": True, "dtype": torch.bfloat16}
-    for batch in [128] for seqlen in [1024, 2048, 4096, 8192, 8192*2, 8192*4] for head in [128]
-]
+def build_shape_configs(device="cuda"):
+    return [
+        {
+            "b": batch,
+            "s_q": 1,
+            "cache_seqlens": torch.tensor(
+                [seqlen + 2 * i for i in range(batch)],
+                dtype=torch.int32,
+                device=device,
+            ),
+            "h_q": head,
+            "h_kv": 1,
+            "d": 512 + 64,
+            "dv": 512,
+            "causal": True,
+            "dtype": torch.bfloat16,
+        }
+        for batch in [128]
+        for seqlen in [1024, 2048, 4096, 8192, 8192 * 2, 8192 * 4]
+        for head in [128]
+    ]
 
 
 def get_args():
@@ -504,6 +521,7 @@ def get_args():
 if __name__ == "__main__":
     args = get_args()
     benchmark_type = "all" if args.all else f"{args.baseline}_vs_{args.target}" if args.compare else args.target
+    shape_configs = build_shape_configs()
     with open(f"{benchmark_type}_perf.csv", "w") as fout:
         fout.write("name,batch,seqlen,head,bw\n")
         for shape in shape_configs:
